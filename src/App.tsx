@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Menu, Search, Plus } from 'lucide-react';
+import { Menu, Search, Plus, Database } from 'lucide-react';
+import { api } from './services/api';
+import { isSupabaseConfigured } from './services/supabase';
 import {
   INITIAL_ACCOUNTS,
   INITIAL_LEDGER_ENTRIES,
@@ -46,6 +48,36 @@ export default function App() {
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>(INITIAL_LEDGER_ENTRIES);
   const [reports, setReports] = useState<ReportSnapshot[]>(INITIAL_REPORTS);
   const [activeReportId, setActiveReportId] = useState<string>(INITIAL_REPORTS[0].id);
+  const [isBackendConnected, setIsBackendConnected] = useState<boolean>(false);
+
+  // Load initial state from backend / Supabase
+  useEffect(() => {
+    let mounted = true;
+    async function loadData() {
+      try {
+        const [accs, ledger, reps] = await Promise.all([
+          api.getAccounts(),
+          api.getLedgerEntries(),
+          api.getReports(),
+        ]);
+        if (mounted) {
+          if (accs.length) setAccounts(accs);
+          if (ledger.length) setLedgerEntries(ledger);
+          if (reps.length) {
+            setReports(reps);
+            setActiveReportId(reps[0].id);
+          }
+          setIsBackendConnected(true);
+        }
+      } catch (e) {
+        console.warn('Backend loading error:', e);
+      }
+    }
+    loadData();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
@@ -97,30 +129,34 @@ export default function App() {
     [ledgerEntries]
   );
 
-  const handleUpdateLedger = (id: string, status: ReconciliationStatus, note: string) => {
+  const handleUpdateLedger = async (id: string, status: ReconciliationStatus, note: string) => {
     setLedgerEntries((prev) =>
       prev.map((item) =>
         item.id === id ? { ...item, status, analystNote: note } : item
       )
     );
     notify(`Updated ledger status to ${status}`);
+    await api.updateLedgerEntry(id, status, note);
   };
 
-  const handleUpdateAccount = (id: string, health: HealthStatus, notes: string) => {
+  const handleUpdateAccount = async (id: string, health: HealthStatus, notes: string) => {
     setAccounts((prev) =>
       prev.map((item) => (item.id === id ? { ...item, health, notes } : item))
     );
     notify(`Saved account notes (${health})`);
+    await api.updateAccount(id, health, notes);
   };
 
-  const handleAddLedgerEntry = (entry: LedgerEntry) => {
+  const handleAddLedgerEntry = async (entry: LedgerEntry) => {
     setLedgerEntries((prev) => [entry, ...prev]);
     notify(`Logged $${entry.amount.toLocaleString()} for ${entry.vendor}`);
+    await api.addLedgerEntry(entry);
   };
 
-  const handleSaveReport = (snapshot: ReportSnapshot) => {
+  const handleSaveReport = async (snapshot: ReportSnapshot) => {
     setReports((prev) => [snapshot, ...prev]);
     setActiveReportId(snapshot.id);
+    await api.saveReport(snapshot);
   };
 
   const handleExportCsv = useCallback(() => {
@@ -188,6 +224,11 @@ export default function App() {
               <span className="font-display font-semibold text-[#F8FAFC] whitespace-nowrap truncate">
                 {SCREEN_TITLES[activeScreen]}
               </span>
+            </div>
+
+            <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#111A2E] border border-[#23314E] text-[11px] text-[#94A3B8]">
+              <span className={`w-2 h-2 rounded-full ${isBackendConnected ? 'bg-[#23C8B5] shadow-[0_0_8px_#23C8B5]' : 'bg-[#F59E0B]'}`} />
+              <span>{isSupabaseConfigured ? 'Supabase Live' : isBackendConnected ? 'Backend Connected' : 'Local Cache'}</span>
             </div>
           </div>
 
